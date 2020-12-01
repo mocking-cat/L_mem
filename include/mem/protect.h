@@ -37,6 +37,7 @@
 #    include <cinttypes>
 #    include <sys/mman.h>
 #    include <unistd.h>
+#    include <sstream>
 #else
 #    error Unknown Platform
 #endif
@@ -63,7 +64,7 @@ namespace mem
         const char* path_name;
     };
 
-    int iter_proc_maps(int (*callback)(region_info*, void*), void* data);
+    int iter_proc_maps(pid_t pid, int (*callback)(region_info*, void*), void* data);
 #endif
 
     class protect : public region
@@ -157,7 +158,7 @@ namespace mem
         internal::prot_query query;
         query.address = reinterpret_cast<std::uintptr_t>(memory);
 
-        if (iter_proc_maps(&internal::prot_query_callback, &query))
+        if (iter_proc_maps(0, &internal::prot_query_callback, &query))
         {
             return query.result;
         }
@@ -188,9 +189,16 @@ namespace mem
     }
 
 #if defined(__unix__)
-    inline int iter_proc_maps(int (*callback)(region_info*, void*), void* data)
+    inline int iter_proc_maps(pid_t pid, int (*callback)(region_info*, void*), void* data)
     {
-        std::FILE* maps = std::fopen("/proc/self/maps", "r");
+        // assemble proc/<pid>/maps path
+        std::stringstream file_stream;
+        file_stream << "/proc/";
+        if (pid) file_stream << pid;
+        else file_stream << "self";
+        file_stream << "/maps";
+
+        std::FILE* maps = std::fopen(file_stream.str().c_str(), "r");
 
         int result = 0;
 
