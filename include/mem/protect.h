@@ -61,10 +61,12 @@ namespace mem
         std::size_t offset;
         int prot;
         int flags;
-        const char* path_name;
+        std::string path_name;
     };
 
     int iter_proc_maps(pid_t pid, int (*callback)(region_info*, void*), void* data);
+
+    int get_region_info(pid_t pid, region_info* info);
 #endif
 
     class protect : public region
@@ -141,6 +143,29 @@ namespace mem
             }
 
             return 0;
+        }
+
+        inline int module_query_callback(region_info* region, void* data)
+        {
+            region_info* query = static_cast<region_info*>(data);
+            // only interest in mmap module by system
+            // which is offset == 0 & readable & private
+            if (region->offset == 0 && (region->prot & PROT_READ) && (region->flags & MAP_PRIVATE))
+            {
+                // clang-format off
+                if (!region->path_name.empty() &&
+                    ::strstr(region->path_name.c_str(), query->path_name.c_str()))
+                {
+                    query->start = region->start;
+                    query->end = region->end;
+                    query->offset = region->offset;
+                    query->prot = region->prot;
+                    query->flags = region->flags;
+                    query->path_name = region->path_name;
+                }
+                // clang-format on
+            }
+            return query->start > 0;
         }
     } // namespace internal
 #endif
@@ -243,7 +268,7 @@ namespace mem
                 else
                 {
                     region.flags |= MAP_ANONYMOUS;
-                    region.path_name = nullptr;
+                    region.path_name.clear();
                 }
 
                 result = callback(&region, data);
@@ -256,6 +281,14 @@ namespace mem
         }
 
         return result;
+    }
+
+    inline int get_region_info(pid_t pid, const std::string& path, region_info* info)
+    {
+        if (!info) throw std::runtime_error("output info is nullptr");
+        ::memset(info, 0, sizeof(region_info));
+        info->path_name = path;
+        return iter_proc_maps(pid, internal::module_query_callback, info);
     }
 #endif
 
